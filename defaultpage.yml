@@ -1,0 +1,38 @@
+---
+- name: Asenda Apache vaikeleht hostinime ja IP-ga
+  hosts: webservers
+  gather_facts: yes
+  become: yes
+
+  vars:
+    apache_pkg: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+    apache_svc: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+    apache_root: "/var/www/html"
+
+  tasks:
+    - name: Kontrolli, et Apache on installitud
+      package:
+        name: "{{ apache_pkg }}"
+        state: present
+
+    - name: Kontrolli, et Apache on lubatud ja töötab
+      service:
+        name: "{{ apache_svc }}"
+        state: started
+        enabled: yes
+
+    - name: Deploy index.html
+      template:
+        src: templates/index.html.j2
+        dest: "{{ apache_root }}/index.html"
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      notify: reload apache
+
+  handlers:
+    - name: reload apache
+      service:
+        name: "{{ apache_svc }}"
+        state: reloaded
