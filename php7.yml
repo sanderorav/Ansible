@@ -1,0 +1,16 @@
+---
+- hosts: webservers
+  tasks:
+    - name: installeerime php
+      apt: name=php update_cache=yes state=latest
+    - name: installeerime libapache-mod-php
+      apt: name=libapache2-mod-php update_cache=yes state=latest
+    - name: installeerime php-mysql
+      apt: name=php-mysql update_cache=yes state=latest
+    - name: loome phpinfo.php faili
+      template:
+        src: templates/phpinfo.php.j2
+        dest: /var/www/html/phpinfo.php
+        owner: www-data
+        group: www-data
+        mode: '0644'
