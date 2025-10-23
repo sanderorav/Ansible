@@ -1,0 +1,39 @@
+---
+- hosts: webservers
+  become: yes
+  tasks:
+    - name: eemaldame phpinfo.php faili
+      file:
+        path: /var/www/html/phpinfo.php
+        state: absent
+    - name: eemaldame php
+      apt:
+        name: php
+        state: absent
+        purge: yes
+        autoremove: yes
+        update_cache: yes
+    - name: eemaldame libapache2-mod-php
+      apt:
+        name: libapache2-mod-php
+        state: absent
+        purge: yes
+        autoremove: yes
+        update_cache: yes
+    - name: eemaldame php-mysql
+      apt:
+        name: php-mysql
+        state: absent
+        purge: yes
+        autoremove: yes
+        update_cache: yes
+    - name: lülitame PHP mooduli Apaches välja (kui see eksisteerib)
+      command: a2dismod php
+      register: a2dismod_result
+      changed_when: "'Module php disabled' in a2dismod_result.stdout"
+      failed_when: false
+    - name: laadime Apache teenuse uuesti (kui see eksisteerib)
+      service:
+        name: apache2
+        state: reloaded
+      failed_when: false
