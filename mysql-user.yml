@@ -1,0 +1,28 @@
+---
+- hosts: webservers
+  become: yes
+  tasks:
+  - name: Paigaldan python3-pymysql Ansible jaoks
+    apt:
+      name: python3-pymysql
+      update_cache: yes
+      state: latest
+  - name: Loome root login faili
+    copy:
+      dest: /root/.my.cnf
+      owner: root
+      group: root
+      mode: 0600
+      content: |
+        [client]
+        user=root
+        password=qwerty
+  - name: Loon kasutaja root parooliga qwerty kõikide privileegidega
+    mysql_user:
+      name: root
+      password: qwerty
+      priv: '*.*:ALL,GRANT'
+      state: present
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+  - name: Taaskäivitus MySQL-ile
+    service: name=mysql state=restarted
