@@ -2,27 +2,61 @@
 - hosts: webservers
   become: yes
   tasks:
-  - name: Paigaldan python3-pymysql Ansible jaoks
-    apt:
-      name: python3-pymysql
-      update_cache: yes
-      state: latest
-  - name: Loome root login faili
-    copy:
-      dest: /root/.my.cnf
-      owner: root
-      group: root
-      mode: 0600
-      content: |
-        [client]
-        user=root
-        password=qwerty
-  - name: Loon kasutaja root parooliga qwerty kõikide privileegidega
-    mysql_user:
-      name: root
-      password: qwerty
-      priv: '*.*:ALL,GRANT'
-      state: present
-      login_unix_socket: /var/run/mysqld/mysqld.sock
-  - name: Taaskäivitus MySQL-ile
-    service: name=mysql state=restarted
+    - name: Ensure MySQL is running
+      service:
+        name: mysql
+        state: started
+        enabled: yes
+
+    # Set root password and force modern plugin (MySQL 8+)
+    - name: Set root password and plugin to caching_sha2_password
+      shell: |
+        mysql --protocol=socket -uroot -e "
+          ALTER USER 'root'@'localhost'
+          IDENTIFIED WITH caching_sha2_password BY 'qwerty';
+          FLUSH PRIVILEGES;
+        "
+      args:
+        executable: /bin/bash
+
+    # Block any other host entries for root (optional hardening for the lab)
+    - name: Ensure only localhost root is present (optional)
+      shell: |
+        mysql --protocol=socket -uroot -pqwerty -e "
+          DELETE FROM mysql.user WHERE user='root' AND host NOT IN ('localhost');
+          FLUSH PRIVILEGES;
+        "
+      args:
+        executable: /bin/bash
+
+    - name: Create /root/.my.cnf (0600)
+      copy:
+        dest: /root/.my.cnf
+        owner: root
+        group: root
+        mode: '0600'
+        content: |
+          [client]
+          user=root
+          password=qwerty
+          host=localhost
+          socket=/var/run/mysqld/mysqld.sock
+
+    # --- Quick proofs for your screenshots ---
+    - name: Show that passwordless login (without .my.cnf) fails
+      shell: "MYSQL_TEST_LOGIN_FILE=/dev/null mysql -uroot -e 'SELECT 1;'"
+      register: pwless_try
+      ignore_errors: true
+
+    - name: Print return code (nonzero means FAIL as expected)
+      debug:
+        var: pwless_try.rc
+
+    - name: Show login works with .my.cnf
+      shell: "mysql -NBe 'SELECT CURRENT_USER(), VERSION();'"
+      register: with_mycnf
+      changed_when: false
+
+    - name: Output of successful login
+      debug:
+        var: with_mycnf.stdout
