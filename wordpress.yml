@@ -99,3 +99,35 @@
       service:
         name: apache2
         state: restarted
+
+    - name: Lae alla wp-cli ja tee käivitatavaks
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        dest: /usr/local/bin/wp
+        mode: '0755'
+
+    - name: Määra saidi URL põhinedes masina IP-l
+      ansible.builtin.set_fact:
+        site_url: "http://{{ ansible_default_ipv4.address }}/wordpress"
+
+    - name: Kontrollime, kas WordPress on juba installitud
+      ansible.builtin.command: wp core is-installed --allow-root
+      args:
+        chdir: /var/www/html/wordpress
+      register: wp_is_installed
+      changed_when: false
+      failed_when: wp_is_installed.rc not in [0, 1]
+
+    - name: Teeme WordPressi automaatse paigalduse (wp core install)
+      ansible.builtin.command: >
+        wp core install
+        --url={{ site_url }}
+        --title="admin wordpressi sait"
+        --admin_user=admin
+        --admin_password=qwerty
+        --admin_email=admin@example.local
+        --skip-email
+        --allow-root
+      args:
+        chdir: /var/www/html/wordpress
+      when: wp_is_installed.rc == 1
