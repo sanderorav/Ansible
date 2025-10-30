@@ -1,0 +1,48 @@
+- name: Loome andmebaasi Wordpressile koos kasutajaga
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Kontrollime, kas andmebaas juba eksisteerib
+      shell: |
+        mysql -NBe "SELECT SCHEMA_NAME
+                    FROM INFORMATION_SCHEMA.SCHEMATA
+                    WHERE SCHEMA_NAME='wpdatabase';"
+      register: db_exists
+      changed_when: false
+      failed_when: false
+
+    - name: Loome andmebaasi wpdatabase (utf8mb4)
+      shell: >
+        mysql -e
+        "CREATE DATABASE \`wpdatabase\`
+         CHARACTER SET utf8mb4
+         COLLATE utf8mb4_unicode_ci;"
+      when: db_exists.stdout == ""
+
+    - name: Kontrollime, kas kasutaja wpuser@localhost eksisteerib
+      shell: |
+        mysql -NBe "SELECT 1 FROM mysql.user
+                    WHERE user='wpuser' AND host='localhost' LIMIT 1;"
+      register: user_exists
+      changed_when: false
+      failed_when: false
+
+    - name: Loome kasutaja wpuser pluginaga caching_sha2_password
+      shell: >
+        mysql -e
+        "CREATE USER 'wpuser'@'localhost'
+         IDENTIFIED WITH caching_sha2_password BY 'qwerty';"
+      when: user_exists.stdout == ""
+
+    - name: Veendume, et wpuser kasutab caching_sha2_password soovitud parooliga
+      shell: >
+        mysql -e
+        "ALTER USER 'wpuser'@'localhost'
+         IDENTIFIED WITH caching_sha2_password BY 'qwerty';"
+
+    - name: Anname wpuser-ile kõik õigused wpdatabase-is
+      shell: >
+        mysql -e
+        "GRANT ALL PRIVILEGES ON \`wpdatabase\`.* TO 'wpuser'@'localhost' WITH GRANT OPTION;
+         FLUSH PRIVILEGES;"
+      changed_when: false
