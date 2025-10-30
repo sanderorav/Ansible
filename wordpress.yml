@@ -46,3 +46,56 @@
         "GRANT ALL PRIVILEGES ON \`wpdatabase\`.* TO 'wpuser'@'localhost' WITH GRANT OPTION;
          FLUSH PRIVILEGES;"
       changed_when: false
+
+    - name: Laadime alla WordPressi
+      get_url:
+        url: https://wordpress.org/latest.tar.gz
+        dest: /tmp/wordpress.tar.gz
+
+    - name: Pakime WordPressi lahti
+      unarchive:
+        src: /tmp/wordpress.tar.gz
+        dest: /var/www/html/
+        remote_src: yes
+
+    - name: Kopeerime wp-config-sample.php kui wp-config.php vajalikku kohta
+      copy:
+        src: /var/www/html/wordpress/wp-config-sample.php
+        dest: /var/www/html/wordpress/wp-config.php
+        remote_src: yes
+
+    - name: Määrame andmebaasi nime
+      lineinfile:
+        path: /var/www/html/wordpress/wp-config.php
+        regexp: "database_name_here"
+        line: "define('DB_NAME', 'wpdatabase');"
+
+    - name: Määrame andmebaasi kasutajanime
+      lineinfile:
+        path: /var/www/html/wordpress/wp-config.php
+        regexp: "username_here"
+        line: "define('DB_USER', 'wpuser');"
+
+    - name: Määrame andmebaasi kasutaja parooli
+      lineinfile:
+        path: /var/www/html/wordpress/wp-config.php
+        regexp: "password_here"
+        line: "define('DB_PASSWORD', 'qwerty');"
+
+    - name: Ensure ownership to www-data
+      ansible.builtin.file:
+        path: /var/www/html/wordpress
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    - name: Paneme kausta õigusteks 755
+      ansible.builtin.shell: "find /var/www/html/wordpress -type d -exec chmod 755 {} +"
+
+    - name: Paneme failide õigusteks 644
+      ansible.builtin.shell: "find /var/www/html/wordpress -type f -exec chmod 644 {} +"
+
+    - name: Taaskäivitame Apache
+      service:
+        name: apache2
+        state: restarted
