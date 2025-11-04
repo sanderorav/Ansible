@@ -1,0 +1,31 @@
+---
+- name: Paigaldame ja seadistame phpMyAdmini Debian serverites
+  hosts: webservers
+  become: yes
+
+  tasks:
+    - name: Uuendame pakettide nimekirja
+      apt:
+        update_cache: yes
+    - name: Paigaldame phpMyAdmin paketi
+      apt:
+        name: phpmyadmin
+        state: present
+
+    - name: Tagame, et phpMyAdmini sümboolne link on Apache kataloogis
+      file:
+        src: /usr/share/phpmyadmin
+        dest: /var/www/html/phpmyadmin
+        state: link
+
+    - name: Taaskäivitame Apache
+      service:
+        name: apache2
+        state: restarted
+
+    - name: Veendume, et Apache töötab ja phpMyAdmin on ligipääsetav
+      uri:
+        url: http://localhost/phpmyadmin
+        return_content: no
+      register: phpmyadmin_status
+      failed_when: "'200' not in phpmyadmin_status.status | string"
