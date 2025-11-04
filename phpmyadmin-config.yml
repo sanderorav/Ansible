@@ -1,0 +1,87 @@
+---
+- name: Seadistame phpMyAdmini config.inc.php Jinja2 malliga
+  hosts: webservers
+  become: yes
+
+  vars:
+    # Soovi korral määra need inventorys/extra-vars-iga
+    pma_default_server: "127.0.0.1"
+    pma_default_port: 3306
+    pma_auth_type: "cookie"        # cookie|http
+    pma_allow_no_password: false   # true|false
+    pma_cfg_dest: "/usr/share/phpmyadmin/config.inc.php"
+    pma_secret_file: "/etc/phpmyadmin/.blowfish_secret"
+
+  pre_tasks:
+    - name: Veendume, et phpMyAdmin on paigaldatud
+      apt:
+        name: phpmyadmin
+        state: present
+        update_cache: yes
+
+    - name: Veendume, et /etc/phpmyadmin olemas
+      file:
+        path: /etc/phpmyadmin
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+  tasks:
+    - name: Kontrollime, kas blowfish_secret fail juba olemas
+      stat:
+        path: "{{ pma_secret_file }}"
+      register: pma_secret_stat
+
+    - name: Loeme olemasoleva blowfish_secret väärtuse
+      when: pma_secret_stat.stat.exists
+      slurp:
+        path: "{{ pma_secret_file }}"
+      register: pma_secret_slurp
+
+    - name: Määrame blowfish_secret faktiks (olemasolev või uus)
+      set_fact:
+        blowfish_secret: >-
+          {{ (pma_secret_slurp.content | default('') | b64decode | trim)
+             if pma_secret_stat.stat.exists
+             else lookup('password', '/dev/null', length=32, chars='ascii_letters,digits') }}
+
+    - name: Püsistame blowfish_secret faili peale, kui seda polnud
+      when: not pma_secret_stat.stat.exists
+      copy:
+        dest: "{{ pma_secret_file }}"
+        content: "{{ blowfish_secret }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Paigutame phpMyAdmini config.inc.php malli alusel
+      template:
+        src: "config.inc.php.j2"
+        dest: "{{ pma_cfg_dest }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: yes
+      notify: Restart Apache
+
+    - name: Veendume, et sihtfail on olemas ja õigetel õigustel
+      file:
+        path: "{{ pma_cfg_dest }}"
+        owner: root
+        group: root
+        mode: "0644"
+        state: file
+
+    - name: Tervisekontroll phpMyAdmini avaleht
+      uri:
+        url: http://localhost/phpmyadmin
+        return_content: no
+      register: phpmyadmin_status
+      failed_when: "'200' not in (phpmyadmin_status.status | string)"
+
+  handlers:
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted
