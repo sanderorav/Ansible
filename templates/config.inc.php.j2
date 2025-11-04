@@ -1,0 +1,18 @@
+<?php
+
+declare(strict_types=1);
+
+$cfg['blowfish_secret'] = '{{ blowfish_secret }}';
+
+$cfg['Servers'] = array();
+$i = 0;
+$i++;
+
+$cfg['Servers'][$i]['host'] = '{{ pma_default_server }}';
+$cfg['Servers'][$i]['port'] = {{ pma_default_port }};
+$cfg['Servers'][$i]['auth_type'] = '{{ pma_auth_type }}'; // cookie on soovituslik
+$cfg['Servers'][$i]['AllowNoPassword'] = {{ 'true' if pma_allow_no_password else 'false' }};
+
+$cfg['AllowArbitraryServer'] = false;
+$cfg['LoginCookieValidity'] = 14400;
+$cfg['CheckConfigurationPermissions'] = true;
