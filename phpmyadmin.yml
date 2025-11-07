@@ -1,31 +1,56 @@
 ---
-- name: Paigaldame ja seadistame phpMyAdmini Debian serverites
+- name: Paigalda ja seadista phpMyAdmin root loginiga
   hosts: webservers
   become: yes
+  vars:
+    phpmyadmin_package: phpmyadmin
+    mysql_root_user: root
+    mysql_root_password: "qwerty"
+    mysql_host: 127.0.0.1
+    mysql_port: 3306
+    blowfish_secret: "{{ lookup('password', '/root/.ansible/pma_blowfish', length=32) }}"
 
   tasks:
     - name: Uuendame pakettide nimekirja
       apt:
         update_cache: yes
+
     - name: Paigaldame phpMyAdmin paketi
       apt:
-        name: phpmyadmin
+        name: "{{ phpmyadmin_package }}"
         state: present
 
-    - name: Tagame, et phpMyAdmini sümboolne link on Apache kataloogis
+    - name: Eemaldame Debiani automaatse phpMyAdmin configi
+      file:
+        path: /etc/phpmyadmin/config-db.php
+        state: absent
+
+    - name: Tagame, et phpMyAdmini sümboolne link on Apache'i kataloogis
       file:
         src: /usr/share/phpmyadmin
         dest: /var/www/html/phpmyadmin
         state: link
+        force: yes
 
-    - name: Taaskäivitame Apache
+    - name: Kopeerime/mallime phpMyAdmin konfigureerimisfaili (config.inc.php)
+      template:
+        src: templates/config.inc.php.j2
+        dest: /usr/share/phpmyadmin/config.inc.php
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Taaskäivitame Apache teenuse
       service:
         name: apache2
         state: restarted
+        enabled: yes
 
     - name: Veendume, et Apache töötab ja phpMyAdmin on ligipääsetav
       uri:
-        url: http://localhost/phpmyadmin
-        return_content: no
-      register: phpmyadmin_status
-      failed_when: "'200' not in phpmyadmin_status.status | string"
+        url: "http://{{ (ansible_host | default(inventory_hostname)) }}/phpmyadmin"
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: pma_check
+      failed_when: pma_check.status != 200 or ('phpMyAdmin' not in (pma_check.content | default('')))
