@@ -1,0 +1,259 @@
+---
+# Kõigepealt jooksutame kõik eelnevad playbookid
+- import_playbook: apache2.yml
+- import_playbook: php7.yml
+- import_playbook: mysql-server.yml
+- import_playbook: mysql-user.yml
+- import_playbook: phpmyadmin.yml
+- import_playbook: wordpress.yml   # optional
+
+- name: Install & configure LibreNMS
+  hosts: webservers
+  become: true
+  gather_facts: true
+
+  vars:
+    ansible_remote_tmp: /tmp
+    librenms_db_name: librenms
+    librenms_db_user: root              # use MySQL root
+    librenms_db_pass: "qwerty"          # or "" if using unix_socket auth
+    librenms_db_host: localhost
+    librenms_db_port: 3306
+
+    librenms_os_user: librenms
+    librenms_web_root: /opt/librenms
+    librenms_fqdn: librenms.local
+
+  pre_tasks:
+    - name: Update apt cache (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+      when: ansible_facts.os_family == 'Debian'
+
+    - name: Ensure sudo is installed (needed for become_user)
+      apt:
+        name: sudo
+        state: present
+
+    - name: Collect installed packages
+      package_facts:
+        manager: auto
+
+  handlers:
+    - name: restart apache
+      service:
+        name: apache2
+        state: restarted
+    - name: reload apache
+      service:
+        name: apache2
+        state: reloaded
+
+  tasks:
+    - name: Install LibreNMS dependencies
+      apt:
+        name:
+          - acl
+          - git
+          - curl
+          - ca-certificates
+          - composer
+          - zip
+          - unzip
+          - graphviz
+          - fping
+          - imagemagick
+          - mtr-tiny
+          - nmap
+          - rrdtool
+          - whois
+          - snmp
+          - snmpd
+          - mysql-client
+          - python3-pymysql
+          - php-cli
+          - php-mysql
+          - php-gd
+          - php-xml
+          - php-mbstring
+          - php-curl
+          - php-zip
+          - php-bcmath
+          - php-snmp
+          - php-intl
+          - libapache2-mod-php
+        state: present
+
+    - name: Ensure MySQL is running
+      service:
+        name: mysql
+        state: started
+        enabled: true
+
+    - name: Create LibreNMS database
+      community.mysql.mysql_db:
+        name: "{{ librenms_db_name }}"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Ensure librenms system user exists
+      user:
+        name: "{{ librenms_os_user }}"
+        comment: LibreNMS user
+        home: "{{ librenms_web_root }}"
+        shell: /bin/bash
+        create_home: yes
+        system: yes
+
+    - name: Ensure /opt/librenms is writable by librenms
+      file:
+        path: "{{ librenms_web_root }}"
+        state: directory
+        owner: "{{ librenms_os_user }}"
+        group: "{{ librenms_os_user }}"
+        mode: "0775"
+        recurse: yes
+
+    - name: Ensure clean vendor tree
+      become: true
+      become_user: "{{ librenms_os_user }}"
+      file:
+        path: "{{ librenms_web_root }}/vendor"
+        state: absent
+
+
+    - name: Composer install as librenms (non-interactive)
+      become_user: "{{ librenms_os_user }}"
+      command: >
+        composer install --no-dev --optimize-autoloader
+        --prefer-dist --no-progress
+      args:
+        chdir: "{{ librenms_web_root }}"
+        creates: "{{ librenms_web_root }}/vendor/autoload.php"
+      environment:
+        COMPOSER_NO_INTERACTION: "1"
+        COMPOSER_ALLOW_SUPERUSER: "1"
+        COMPOSER_HOME: "/home/{{ librenms_os_user }}/.composer"
+
+    - name: Ensure ownership of LibreNMS tree
+      file:
+        path: "{{ librenms_web_root }}"
+        owner: "{{ librenms_os_user }}"
+        group: "{{ librenms_os_user }}"
+        recurse: yes
+
+    - name: Ensure logs and rrd have correct modes
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ librenms_os_user }}"
+        group: "{{ librenms_os_user }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ librenms_web_root }}/logs", mode: "0775" }
+        - { path: "{{ librenms_web_root }}/rrd",  mode: "0775" }
+
+    - name: Enable Apache rewrite module
+      command: a2enmod rewrite
+      args:
+        creates: /etc/apache2/mods-enabled/rewrite.load
+      notify: reload apache
+
+    - name: Configure Apache vhost for LibreNMS
+      blockinfile:
+        path: /etc/apache2/sites-available/librenms.conf
+        create: yes
+        owner: root
+        group: root
+        mode: "0644"
+        block: |
+          <VirtualHost *:80>
+              ServerName {{ librenms_fqdn }}
+              DocumentRoot {{ librenms_web_root }}/html
+
+              <Directory "{{ librenms_web_root }}/html">
+                  Require all granted
+                  AllowOverride All
+                  Options FollowSymLinks MultiViews
+              </Directory>
+
+              ErrorLog  ${APACHE_LOG_DIR}/librenms_error.log
+              CustomLog ${APACHE_LOG_DIR}/librenms_access.log combined
+          </VirtualHost>
+      notify: reload apache
+
+    - name: Enable LibreNMS site
+      file:
+        src: /etc/apache2/sites-available/librenms.conf
+        dest: /etc/apache2/sites-enabled/librenms.conf
+        state: link
+      notify: restart apache
+
+    - name: Disable default Apache site
+      file:
+        path: /etc/apache2/sites-enabled/000-default.conf
+        state: absent
+      notify: restart apache
+
+    - name: Create LibreNMS config.php
+      blockinfile:
+        path: "{{ librenms_web_root }}/config.php"
+        create: yes
+        owner: "{{ librenms_os_user }}"
+        group: "{{ librenms_os_user }}"
+        mode: "0640"
+        block: |
+          <?php
+          $config['db_host'] = '{{ librenms_db_host }}';
+          $config['db_port'] = {{ librenms_db_port }};
+          $config['db_user'] = '{{ librenms_db_user }}';
+          $config['db_pass'] = '{{ librenms_db_pass }}';
+          $config['db_name'] = '{{ librenms_db_name }}';
+
+          $config['user'] = '{{ librenms_os_user }}';
+          $config['install_dir'] = '{{ librenms_web_root }}';
+
+          $config['snmp']['community'] = array('public');
+
+          $config['fping'] = '/usr/bin/fping';
+          $config['rrdtool'] = '/usr/bin/rrdtool';
+          $config['rrd_dir'] = '{{ librenms_web_root }}/rrd';
+
+          $config['base_url'] = 'http://{{ librenms_fqdn }}/';
+
+    - name: Ensure snmpd is running
+      service:
+        name: snmpd
+        state: started
+        enabled: true
+
+    - name: Configure LibreNMS cron jobs
+      blockinfile:
+        path: /etc/cron.d/librenms
+        create: yes
+        mode: "0644"
+        block: |
+          */5 * * * * {{ librenms_os_user }} {{ librenms_web_root }}/cronic {{ librenms_web_root }}/poller-wrapper.php 16
+          *    * * * * {{ librenms_os_user }} php {{ librenms_web_root }}/artisan schedule:run >> /dev/null 2>&1
+          15   0 * * * {{ librenms_os_user }} php {{ librenms_web_root }}/daily.sh >> /dev/null 2>&1
+
+    - name: Ensure cron service is running
+      service:
+        name: cron
+        state: started
+        enabled: true
+
+    - name: Reload systemd (safe even if unchanged)
+      command: systemctl daemon-reload
+      changed_when: false
+
+    - name: Verify LibreNMS web interface is reachable
+      uri:
+        url: "http://localhost/"
+        return_content: no
+        status_code: 200
+      register: http_check
+      failed_when: http_check.status not in [200,301,302]
+      retries: 5
+      delay: 5
+      until: http_check.status in [200,301,302]
